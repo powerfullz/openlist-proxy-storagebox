@@ -1,0 +1,9 @@
+# Real config (contains the OpenList admin token)
+public/config.php
+
+# Build output
+dist/
+
+# Local noise
+*.log
+.DS_Store

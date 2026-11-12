@@ -1,0 +1,21 @@
+# One-layer deployment: upload this directory's contents into public_html.
+# Keep dl.php public, but block the app internals and the token file.
+# Comment out Options if your host disallows it or you need directory listings.
+Options -Indexes
+
+<IfModule mod_authz_core.c>
+    <FilesMatch "^(config|bootstrap)\.php$">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+    <FilesMatch "^(config|bootstrap)\.php$">
+        Order allow,deny
+        Deny from all
+    </FilesMatch>
+</IfModule>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(src|tests|scripts)(/|$) - [F,L]
+</IfModule>
