@@ -5,8 +5,8 @@ declare(strict_types=1);
 /**
  * Minimal PSR-4 style autoloader for the OpenListProxy namespace.
  *
- * The app lives outside public_html, so there is no Composer dependency to
- * install on the shared host: one small autoloader is enough.
+ * No Composer dependency is needed on the shared host: one small autoloader
+ * is enough.
  */
 spl_autoload_register(static function (string $class): void {
     $prefix = 'OpenListProxy\\';

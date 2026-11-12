@@ -1,5 +1,5 @@
 # Real config (contains the OpenList admin token)
-public/config.php
+/config.php
 
 # Build output
 dist/

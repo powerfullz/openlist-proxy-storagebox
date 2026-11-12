@@ -2,7 +2,7 @@
 
 让 OpenList 里**没有公网直链**的存储（SFTP、rsync 虚拟主机、StorageBox 等）也能 302 直链下载：文件不经过 OpenList 中转，浏览器直接向存储所在的主机取文件。
 
-- 一个 `dl.php` 入口，整个 `public/` 丢进网站根目录即可
+- 一个 `dl.php` 入口，发布包解压后直接复制到网站根目录即可
 - 用 OpenList 同款 HMAC 校验链接，不裸奔
 - 多挂载点、最长前缀匹配
 - 302 到静态文件，支持 Range / 断点续传
@@ -67,7 +67,7 @@ sequenceDiagram
 
 ### 1. 上传
 
-把 `public/` **里面的内容**（不是 `public` 文件夹本身）上传到网站根目录：
+下载 Release 里的 `openlist-proxy.zip`（没有 zip 时会生成 `openlist-proxy.tar.gz`），解压后直接把里面的文件复制到网站根目录。使用 Git 仓库时，仓库根目录本身就是部署目录，不再额外经过 `public/` 这一层。
 
 ```text
 public_html/
@@ -81,11 +81,9 @@ public_html/
 └── tests/
 ```
 
-所有文件都在同一层，没有额外的应用子目录。
+覆盖升级时保留已有的 `config.php`，发布包不会携带或覆盖它。
 
-> 建议放在独立子域或独立目录。如果直接丢进已有站点的根目录，`src/`、`tests/`、`scripts/` 可能和现有目录重名；改名后同步改 `dl.php` 和 `.htaccess` 即可。
-
-也可以直接下载 Release 里的 `openlist-proxy.zip`（没有 zip 时会生成 `openlist-proxy.tar.gz`），解压到 `public_html`。
+> 建议放在独立子域或独立目录。如果直接丢进已有站点的根目录，`src/`、`tests/`、`scripts/` 可能和现有目录重名；改名后同步改 `bootstrap.php` 和 `.htaccess` 即可。
 
 ### 2. 建静态入口
 
@@ -295,27 +293,28 @@ make package   # 生成 dist/openlist-proxy.zip（没有 zip 时生成 .tar.gz�
 本地没有 PHP 时可以用 Docker：
 
 ```bash
-docker run --rm -v "$PWD":/src -w /src/public \
+docker run --rm -v "$PWD":/src -w /src \
   php:8.2-cli php tests/run.php
 
-docker run --rm -v "$PWD":/src php:8.2-cli \
-  sh -c 'find /src/public /src/scripts -name "*.php" -print0 | xargs -0 -n1 php -l'
+docker run --rm -v "$PWD":/src -w /src php:8.2-cli \
+  sh -c 'for file in dl.php bootstrap.php config.sample.php; do php -l "$file"; done && find src scripts tests -name "*.php" -print0 | xargs -0 -n1 php -l'
 ```
 
 目录结构：
 
 ```text
-public/                       # 部署包：把这层里面的东西丢进 public_html
+./                            # 仓库根目录，也是发布包的部署根目录
 ├── dl.php                    # 唯一 Web 入口
 ├── bootstrap.php
 ├── config.sample.php
 ├── .htaccess                 # 拒绝 config/bootstrap 和 src/tests/scripts
-├── scripts/sign.php
+├── scripts/
+│   ├── sign.php
+│   └── package.sh
 ├── src/
-└── tests/run.php
-scripts/package.sh
-Makefile
-LICENSE
+├── tests/run.php
+├── Makefile
+└── LICENSE
 ```
 
 ---
@@ -324,7 +323,7 @@ LICENSE
 
 A tiny PHP 302 proxy for OpenList storages that have no public direct link (SFTP, rsync-only StorageBoxes, etc.).
 
-1. Upload the **contents** of `public/` to `public_html`.
+1. Extract the release archive and copy its contents directly to `public_html`. The repository root uses the same deployable layout.
 2. Symlink your data directory: `ln -s /home/username/files f`.
 3. `cp config.sample.php config.php` and fill in `token` plus the `mounts` mapping.
 4. In OpenList, set **Download Proxy URL** to `https://example.com/dl.php` (no trailing slash).
