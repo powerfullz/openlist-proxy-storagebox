@@ -1,5 +1,7 @@
 # One-layer deployment: upload this directory's contents into public_html.
 # Keep dl.php public, but block the app internals and the token file.
+# Downloads are streamed by dl.php after signature verification, so do not
+# create a public symlink or Alias to the data directory.
 # Comment out Options if your host disallows it or you need directory listings.
 Options -Indexes
 
@@ -21,14 +23,40 @@ Options -Indexes
     Header always set Access-Control-Allow-Headers "Accept, Authorization, Content-Type, Origin, Range, X-Requested-With"
     Header always set Access-Control-Expose-Headers "Accept-Ranges, Content-Disposition, Content-Length, Content-Range, Content-Type, ETag, Last-Modified"
     Header always set Access-Control-Max-Age "86400"
+    Header merge Vary "Accept-Encoding"
 
     <FilesMatch "\.(?:m3u8|mpd)$">
         Header set Cache-Control "no-cache"
     </FilesMatch>
 </IfModule>
 
+# Compression whitelist: only text-like MIME types are compressed.
+# Everything else, including audio/video/images/archives/PDF/fonts, stays raw.
+<IfModule mod_deflate.c>
+    # Remove any host-wide "compress everything" filter before adding the
+    # whitelist again. Ignored when the host does not define it.
+    <IfModule mod_mime.c>
+        RemoveOutputFilter DEFLATE
+    </IfModule>
+
+    AddOutputFilterByType DEFLATE \
+        text/plain text/html text/css text/csv text/xml text/vtt \
+        application/json application/ld+json application/xml \
+        application/xhtml+xml application/javascript application/x-javascript \
+        image/svg+xml application/x-subrip \
+        application/vnd.apple.mpegurl application/dash+xml
+</IfModule>
+
 <IfModule mod_setenvif.c>
-    SetEnvIfNoCase Request_URI "\.(mp4|m4v|m4s|mkv|webm|ts|mp3|m4a|ogg|oga|opus|flac)$" no-gzip dont-vary
+    # dl.php applies its own text-only gzip policy. Disable Apache compression
+    # for the app so binary responses keep an exact Content-Length.
+    SetEnvIf Request_URI "(^|/)dl\.php" no-gzip
+    SetEnvIf Request_URI "(^|/)dl/" no-gzip
+    SetEnvIf Request_URI "(^|/)dl\.php" ap_trust_cgilike_cl 1
+    SetEnvIf Request_URI "(^|/)dl/" ap_trust_cgilike_cl 1
+
+    # Byte ranges must never be compressed, otherwise resume/seek breaks.
+    SetEnvIf Range "^bytes=" no-gzip
 </IfModule>
 
 <IfModule mod_mime.c>

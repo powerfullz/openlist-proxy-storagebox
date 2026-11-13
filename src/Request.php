@@ -29,7 +29,7 @@ final class Request
     }
 
     /**
-     * Recover the OpenList path after the configured public prefix.
+     * Recover the OpenList path after the configured proxy prefix.
      */
     public function path(string $prefix): string
     {
@@ -79,6 +79,44 @@ final class Request
         $range = $this->server['HTTP_RANGE'] ?? null;
 
         return is_string($range) ? $range : null;
+    }
+
+    /**
+     * Whether the client explicitly accepts gzip. Explicit gzip;q=0 wins
+     * over a wildcard entry.
+     */
+    public function acceptsGzip(): bool
+    {
+        $header = (string)($this->server['HTTP_ACCEPT_ENCODING'] ?? '');
+        if ($header === '') {
+            return false;
+        }
+
+        $gzip = null;
+        $wildcard = null;
+
+        foreach (explode(',', $header) as $part) {
+            $tokens = explode(';', trim($part));
+            $coding = strtolower(trim($tokens[0]));
+            if ($coding !== 'gzip' && $coding !== '*') {
+                continue;
+            }
+
+            $q = 1.0;
+            for ($i = 1; $i < count($tokens); $i++) {
+                if (preg_match('/^\s*q\s*=\s*([0-9.]+)\s*$/i', $tokens[$i], $m)) {
+                    $q = (float)$m[1];
+                }
+            }
+
+            if ($coding === 'gzip') {
+                $gzip = $q;
+            } else {
+                $wildcard = $q;
+            }
+        }
+
+        return ($gzip ?? $wildcard ?? 0.0) > 0.0;
     }
 
     private function requestUri(): string

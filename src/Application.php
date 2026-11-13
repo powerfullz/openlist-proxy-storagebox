@@ -6,7 +6,7 @@ namespace OpenListProxy;
 
 /**
  * Wires the request pipeline together:
- * request -> signature -> mount resolution -> redirect or stream.
+ * request -> signature -> mount resolution -> stream.
  */
 final class Application
 {
@@ -45,20 +45,15 @@ final class Application
             error_log('[openlist-proxy] path=' . $path);
         }
 
-        if ($this->config->requireSign()) {
-            (new Signature($this->config->token()))->verify($path, $request->sign());
-        }
+        (new Signature($this->config->token()))->verify($path, $request->sign());
 
         $file = (new MountResolver($this->config->mounts()))->resolve($path);
 
-        if ($file->mount()->publicBase() !== '') {
-            Response::redirect($file->publicUrl());
-        }
-
-        if (!$this->config->streamFallback()) {
-            throw new HttpException(500, 'public base not configured');
-        }
-
-        Response::stream($file->path(), $request->method(), $request->range());
+        Response::stream(
+            $file->path(),
+            $request->method(),
+            $request->range(),
+            $request->acceptsGzip()
+        );
     }
 }
