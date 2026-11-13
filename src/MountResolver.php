@@ -55,7 +55,7 @@ final class MountResolver
             throw new HttpException(404, 'not found');
         }
 
-        return new ResolvedFile($mount, $segments, $fileReal);
+        return new ResolvedFile($mount, $fileReal);
     }
 
     private function findMount(string $requestPath): ?Mount

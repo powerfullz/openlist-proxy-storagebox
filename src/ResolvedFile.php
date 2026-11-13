@@ -9,12 +9,8 @@ namespace OpenListProxy;
  */
 final class ResolvedFile
 {
-    /**
-     * @param string[] $segments
-     */
     public function __construct(
         private Mount $mount,
-        private array $segments,
         private string $path
     ) {
     }
@@ -24,23 +20,8 @@ final class ResolvedFile
         return $this->mount;
     }
 
-    /**
-     * @return string[]
-     */
-    public function segments(): array
-    {
-        return $this->segments;
-    }
-
     public function path(): string
     {
         return $this->path;
-    }
-
-    public function publicUrl(): string
-    {
-        return $this->mount->publicBase()
-            . '/'
-            . implode('/', array_map('rawurlencode', $this->segments));
     }
 }

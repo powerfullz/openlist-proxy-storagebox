@@ -7,6 +7,7 @@ require __DIR__ . '/../bootstrap.php';
 use OpenListProxy\ByteRange;
 use OpenListProxy\Config;
 use OpenListProxy\HttpException;
+use OpenListProxy\Mime;
 use OpenListProxy\Mount;
 use OpenListProxy\MountResolver;
 use OpenListProxy\Request;
@@ -103,34 +104,65 @@ $request = new Request(
 );
 same('/storagebox/hello.txt', $request->path(''), 'auto-detected subdirectory prefix');
 
+$request = new Request(['HTTP_ACCEPT_ENCODING' => 'gzip, deflate'], []);
+check($request->acceptsGzip(), 'gzip accepted');
+
+$request = new Request(['HTTP_ACCEPT_ENCODING' => 'br, gzip;q=0.8'], []);
+check($request->acceptsGzip(), 'gzip with quality accepted');
+
+$request = new Request(['HTTP_ACCEPT_ENCODING' => 'gzip;q=0'], []);
+check(!$request->acceptsGzip(), 'gzip;q=0 rejected');
+
+$request = new Request(['HTTP_ACCEPT_ENCODING' => 'gzip;q=0, *;q=1'], []);
+check(!$request->acceptsGzip(), 'explicit gzip;q=0 overrides wildcard');
+
+$request = new Request(['HTTP_ACCEPT_ENCODING' => '*'], []);
+check($request->acceptsGzip(), 'wildcard gzip accepted');
+
+$request = new Request([], []);
+check(!$request->acceptsGzip(), 'missing accept-encoding rejected');
+
 // --- Mount resolution ------------------------------------------------------
 
-$specific = new Mount('/storagebox', $root, 'https://example.test/f');
+$specific = new Mount('/storagebox', $root);
 $resolver = new MountResolver([$specific]);
 
 $file = $resolver->resolve('/storagebox/hello.txt');
 same($root . '/hello.txt', $file->path(), 'file resolved below root');
-same('https://example.test/f/hello.txt', $file->publicUrl(), 'public URL built');
 
 $file = $resolver->resolve('/storagebox/sub/中文 文件.txt');
-same(
-    'https://example.test/f/sub/%E4%B8%AD%E6%96%87%20%E6%96%87%E4%BB%B6.txt',
-    $file->publicUrl(),
-    'unicode public URL encoded'
-);
+same($root . '/sub/中文 文件.txt', $file->path(), 'unicode path resolved');
 
 throws(fn() => $resolver->resolve('/storagebox/../etc/passwd'), 404, 'path traversal rejected');
 throws(fn() => $resolver->resolve('/storagebox/escape.txt'), 404, 'symlink escape rejected');
 throws(fn() => $resolver->resolve('/other/hello.txt'), 404, 'unknown mount rejected');
 
-$rootMount = new Mount('/', $root, 'https://example.test/all');
+$rootMount = new Mount('/', $root);
 $resolver = new MountResolver([$rootMount, $specific]);
 $file = $resolver->resolve('/storagebox/hello.txt');
-same('https://example.test/f/hello.txt', $file->publicUrl(), 'longest mount wins');
+same($root . '/hello.txt', $file->path(), 'longest mount wins');
 
 $resolver = new MountResolver([$rootMount]);
 $file = $resolver->resolve('/hello.txt');
-same('https://example.test/all/hello.txt', $file->publicUrl(), 'root mount works');
+same($root . '/hello.txt', $file->path(), 'root mount works');
+
+// --- MIME policy -----------------------------------------------------------
+
+same('text/plain', Mime::normalize('Text/Plain; charset=UTF-8'), 'mime parameters stripped');
+check(Mime::isCompressible('text/plain'), 'plain text compressible');
+check(Mime::isCompressible('text/plain; charset=utf-8'), 'text with charset compressible');
+check(Mime::isCompressible('application/json'), 'json compressible');
+check(Mime::isCompressible('application/xml'), 'xml compressible');
+check(Mime::isCompressible('image/svg+xml'), 'svg compressible');
+check(!Mime::isCompressible('video/mp4'), 'video is not compressible');
+check(!Mime::isCompressible('image/png'), 'png is not compressible');
+check(!Mime::isCompressible('application/zip'), 'zip is not compressible');
+check(!Mime::isCompressible('application/pdf'), 'pdf is not compressible');
+check(!Mime::isCompressible('application/octet-stream'), 'octet-stream is not compressible');
+check(!Mime::isCompressible(''), 'empty mime is not compressible');
+check(Mime::isInline('video/mp4'), 'video inline');
+check(Mime::isInline('text/vtt'), 'vtt inline');
+check(!Mime::isInline('application/zip'), 'zip attachment');
 
 // --- Byte ranges -----------------------------------------------------------
 
@@ -162,12 +194,21 @@ file_put_contents(
     $configFile,
     "<?php return ['token' => 't', 'path_prefix' => '/dl.php', 'mounts' => ['/storagebox' => ['root' => "
     . var_export($root, true)
-    . ", 'public' => 'https://example.test/f']]];"
+    . "]]];"
 );
 
 $config = Config::fromFile($configFile);
 same('t', $config->token(), 'config token');
 same(1, count($config->mounts()), 'config mount count');
+
+$legacyConfig = $base . '/legacy-config.php';
+file_put_contents(
+    $legacyConfig,
+    "<?php return ['token' => 't', 'require_sign' => false, 'stream_fallback' => false, "
+    . "'mounts' => ['/storagebox' => ['root' => " . var_export($root, true) . ", 'public' => '/f']]];"
+);
+$legacy = Config::fromFile($legacyConfig);
+same(1, count($legacy->mounts()), 'legacy config still loads');
 
 $badConfig = $base . '/bad-config.php';
 file_put_contents($badConfig, "<?php return ['mounts' => []];");
@@ -186,6 +227,7 @@ try {
 @rmdir($root . '/sub');
 @rmdir($root);
 @unlink($configFile);
+@unlink($legacyConfig);
 @unlink($badConfig);
 @rmdir($base);
 

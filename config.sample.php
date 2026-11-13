@@ -18,26 +18,18 @@ return [
     // Set it only if you use a rewrite such as /dl/... -> dl.php.
     'path_prefix' => '',
 
-    // OpenList mount path => local root + public URL prefix.
+    // Optional site origin used by scripts/sign.php when generating test URLs.
+    // Example: 'https://example.com'. Not used by dl.php itself.
+    'base_url' => '',
+
+    // OpenList mount path => local root.
     'mounts' => [
         '/storagebox' => [
             // The same directory you set as the SFTP "root folder path" in
             // OpenList. This is where the files actually live on this host.
             'root' => '/home/username/files',
-
-            // The URL of the symlink you created in public_html.
-            // A root-relative value such as /f also works.
-            'public' => '/f',
         ],
     ],
-
-    // Verify the OpenList HMAC. Keep this true unless you really want
-    // "anyone who knows the path can download".
-    'require_sign' => true,
-
-    // If "public" is empty, stream the file through PHP instead of 302.
-    // Still does not go through OpenList, but uses a PHP worker.
-    'stream_fallback' => false,
 
     // Log request paths to PHP's error_log. Turn off after debugging.
     'debug' => false,

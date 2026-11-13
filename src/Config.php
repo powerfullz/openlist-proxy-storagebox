@@ -15,8 +15,6 @@ final class Config
     private function __construct(
         private string $token,
         private string $pathPrefix,
-        private bool $requireSign,
-        private bool $streamFallback,
         private bool $debug,
         private array $mounts
     ) {
@@ -48,8 +46,6 @@ final class Config
         return new self(
             (string)($raw['token'] ?? ''),
             (string)($raw['path_prefix'] ?? ''),
-            (bool)($raw['require_sign'] ?? true),
-            (bool)($raw['stream_fallback'] ?? false),
             (bool)($raw['debug'] ?? false),
             $mounts
         );
@@ -63,16 +59,6 @@ final class Config
     public function pathPrefix(): string
     {
         return $this->pathPrefix;
-    }
-
-    public function requireSign(): bool
-    {
-        return $this->requireSign;
-    }
-
-    public function streamFallback(): bool
-    {
-        return $this->streamFallback;
     }
 
     public function debug(): bool

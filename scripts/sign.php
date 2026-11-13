@@ -46,16 +46,10 @@ if ($token === null) {
 }
 
 if ($base === null && $config !== null) {
-    $prefix = (string)($config['path_prefix'] ?? '/dl.php');
-    foreach (($config['mounts'] ?? []) as $cfg) {
-        if (!is_array($cfg) || !isset($cfg['public'])) {
-            continue;
-        }
-        $parts = parse_url((string)$cfg['public']);
-        if (isset($parts['scheme'], $parts['host'])) {
-            $base = $parts['scheme'] . '://' . $parts['host'] . $prefix;
-        }
-        break;
+    $baseUrl = rtrim((string)($config['base_url'] ?? ''), '/');
+    if ($baseUrl !== '') {
+        $prefix = (string)($config['path_prefix'] ?? '');
+        $base = $baseUrl . ($prefix !== '' ? $prefix : '/dl.php');
     }
 }
 

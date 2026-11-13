@@ -5,19 +5,17 @@ declare(strict_types=1);
 namespace OpenListProxy;
 
 /**
- * One OpenList mount point mapped to a local directory and a public URL base.
+ * One OpenList mount point mapped to a local directory.
  */
 final class Mount
 {
     private string $path;
     private string $root;
-    private string $publicBase;
 
-    public function __construct(string $path, string $root, string $publicBase)
+    public function __construct(string $path, string $root)
     {
         $this->path = rtrim($path, '/');
         $this->root = $root === '/' ? '/' : rtrim($root, '/');
-        $this->publicBase = rtrim($publicBase, '/');
 
         if ($this->root === '') {
             throw new \RuntimeException('mount root cannot be empty');
@@ -34,7 +32,7 @@ final class Mount
             throw new \RuntimeException('mount root not configured: ' . $path);
         }
 
-        return new self($path, $root, (string)($cfg['public'] ?? ''));
+        return new self($path, $root);
     }
 
     public function path(): string
@@ -45,11 +43,6 @@ final class Mount
     public function root(): string
     {
         return $this->root;
-    }
-
-    public function publicBase(): string
-    {
-        return $this->publicBase;
     }
 
     public function matches(string $requestPath): bool
