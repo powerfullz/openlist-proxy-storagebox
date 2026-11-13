@@ -16,50 +16,9 @@
 
 ## 它解决什么问题
 
-很多 StorageBox / 虚拟主机只给 SFTP 或 rsync，没有公网直链。用 OpenList 的 SFTP 驱动挂载后，下载会变成这样：OpenList 先从 StorageBox 读完整文件，再转发给用户。两边各承担一份完整流量。
+很多 StorageBox / 虚拟主机只给 SFTP 或 rsync，没有公网直链。挂到 OpenList 后，默认下载会经 OpenList 中转，两边各承担一份完整流量。本项目把路径拉直：OpenList 只负责目录和签名，文件由存储所在主机上的 `dl.php` 验签后直接输出，不再经过 OpenList 中转。
 
-```mermaid
-flowchart LR
-    U["用户浏览器"] -->|"① 请求下载"| O["OpenList"]
-    O -->|"② SFTP 读取整份文件"| S["StorageBox"]
-    S -->|"③ 整份文件流"| O
-    O -->|"④ 转发整份文件"| U
-    O -.->|"列表 / stat 等元数据"| S
-```
-
-这个项目把路径拉直：OpenList 只负责目录和签名，文件由存储所在主机上的 `dl.php` 读取并输出，不再经过 OpenList 中转。
-
-```mermaid
-flowchart LR
-    U["用户浏览器"] -->|"① 列表 / 取下载链接"| O["OpenList"]
-    O -->|"SFTP 只读元数据"| S["StorageBox"]
-    O -->|"② 302 到带签名的代理 URL"| U
-    U -->|"③ GET /dl.php/...?sign=..."| P["StorageBox 上的 dl.php"]
-    P -->|"④ 校验 HMAC"| P
-    P -->|"⑤ 读取本地文件并流式输出"| U
-```
-
-下载时序：
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant U as 用户浏览器
-    participant O as OpenList
-    participant S as StorageBox SFTP
-    participant P as dl.php
-
-    U->>O: 打开目录 / 点击下载
-    O->>S: list / stat（仅元数据）
-    S-->>O: 文件名、大小、修改时间
-    O-->>U: raw_url = https://example.com/dl.php/PATH?sign=...
-    U->>P: GET /dl.php/PATH?sign=...
-    P->>P: 校验 HMAC + 过期时间
-    P->>P: 解析挂载路径，确认文件在 root 内
-    P-->>U: 200 / 206，文件内容
-```
-
-> 关键变化：`dl.php` 不再 302 到 `/f/...` 静态目录。没有有效签名就拿不到文件，断点续传的每个 Range 请求也都会重新验签。
+架构图、下载时序、签名算法与设计决策见 [docs/architecture.md](docs/architecture.md)。
 
 ---
 
@@ -177,7 +136,7 @@ curl -I -H 'Range: bytes=0-4' \
 
 ```bash
 php tests/run.php
-# OK (56 assertions)
+# OK (64 assertions)
 ```
 
 ---
@@ -191,49 +150,11 @@ php tests/run.php
 | `base_url` | 可选，`scripts/sign.php` 生成完整测试 URL 时使用的站点地址。 |
 | `mounts` | OpenList 挂载路径 → `root`（本地绝对路径）。 |
 | `debug` | 把请求路径写进 PHP error_log，排查完关掉。 |
+| `xsendfile` | 可选，默认 `false`。验签后交给 Apache 原生分发文件，需要 `mod_xsendfile`，见 [docs/performance.md](docs/performance.md)。 |
 
 多个挂载就继续往 `mounts` 里加，匹配时取最长前缀，所以 `/` 和 `/storagebox` 可以共存。
 
 旧版本配置里的 `public`、`require_sign`、`stream_fallback` 已废弃，会被忽略。**签名校验现在始终开启，不能通过配置关闭。**
-
----
-
-## 原理
-
-OpenList 的 SFTP 驱动是 `OnlyProxy`，本身不产生公网直链。给存储填上 **下载代理 URL** 后，OpenList 需要代理时会生成：
-
-```text
-https://example.com/dl.php/<OpenList 路径>?sign=<签名>
-```
-
-并直接 302 过去，不会先打开文件。`dl.php` 验证签名后，把 OpenList 路径去掉挂载前缀，映射到本地文件，然后自己读取并输出：
-
-```text
-GET /dl.php/storagebox/电影/foo.mkv?sign=...
-→ 200 Content-Type: video/x-matroska
-→ 文件内容（支持 Range）
-```
-
-### 签名算法
-
-OpenList 用管理员 Token 对路径签名，PHP 里必须完全一致：
-
-```php
-$expire = 0; // 0 = 永不过期；否则是 Unix 时间戳
-$data   = $path . ':' . $expire;
-$sign   = strtr(
-    base64_encode(hash_hmac('sha256', $data, $token, true)),
-    '+/',
-    '-_'
-) . ':' . $expire;
-```
-
-几个容易踩的点：
-
-- `path` 是 **URL 解码后** 的 OpenList 完整路径，包含挂载路径，例如 `/storagebox/电影/foo.mkv`。
-- 用 URL-safe Base64，但 **保留 `=` 填充**。
-- `expire` 为 `0` 表示永不过期。
-- Token 在 OpenList 后台 **设置 → 其他 → Token**，不是用户密码。
 
 ---
 
@@ -243,6 +164,7 @@ $sign   = strtr(
 - **每个下载请求都必须带有效签名**。没有签名、签名错误或链接过期都会返回 `401`，不再有可以绕过的静态 `/f/...` 地址。
 - **签名链接在过期前仍然可以被复制和转发**。这是无状态 HMAC 的固有特性；要真正做到一次性链接，需要额外的 nonce/数据库存储，本项目暂不包含。建议在 OpenList 里设置非 `0` 的链接过期时间。
 - **数据目录不要放在 Web 可直接访问的位置**。如果必须放在 `public_html` 下，请用 `.htaccess` 或 Nginx 规则拒绝直接访问。
+- **启用 X-Sendfile 时**，`XSendFilePath` 白名单只圈数据根：该机制会绕过 `Deny from all` 发送白名单内的任何文件，切勿圈 Web 根或应用目录。
 - **路径穿越和符号链接逃逸**已经拦截：`..`、空段、`realpath` 越出 `root` 都会返回 404。
 - **目录列表**：包里的 `.htaccess` 默认已经加了 `Options -Indexes`；如果和现有站点冲突，可以删掉那一行，并在数据目录单独加一个 `.htaccess`。
 - **敏感文件默认拒绝直接访问**：站点根目录的 `.htaccess` 会拒绝 `config.php`、`bootstrap.php`，以及 `src/`、`tests/`、`scripts/` 下的所有文件。
@@ -257,69 +179,14 @@ $sign   = strtr(
 - **HTTPS**：代理 URL 建议走 HTTPS，避免签名链接在传输中泄漏。
 - **Token 轮换**：改了 OpenList Token 后，同步改根目录的 `config.php`。
 
-### gzip 压缩策略
+---
 
-压缩使用 **MIME 白名单**，只有文本型内容允许 gzip：
+## 性能与压缩
 
-```text
-text/*
-application/json
-application/ld+json
-application/xml
-application/xhtml+xml
-application/javascript
-application/x-javascript
-image/svg+xml
-application/x-subrip
-application/vnd.apple.mpegurl
-application/dash+xml
-```
+- 只对文本型 MIME 白名单启用 gzip；二进制和 Range 响应永不压缩，保证断点续传和播放器 seek。
+- 默认 PHP 流式输出；主机 Apache 装有 `mod_xsendfile` 时可启用 `xsendfile`，验签后交给 Apache 原生分发，大幅降低 CPU 与 worker 占用。
 
-视频、音频、图片（SVG 除外）、压缩包、PDF、字体、`application/octet-stream` 等二进制类型一律不压缩。
-
-压缩由 `dl.php` 自己完成，而不是交给 Apache/Nginx：
-
-- 文本文件且客户端接受 gzip 时才压缩
-- 小于 2 MiB 的文本文件在 PHP 内压缩，能返回压缩后的 `Content-Length`
-- 更大的文本文件流式 gzip，不返回 `Content-Length`
-- 二进制文件永远不压缩，始终返回原始 `Content-Length`
-- `Range` / `206` 永远不压缩，保证断点续传和播放器 seek
-- `.htaccess` 对 `dl.php` 显式设置 `no-gzip`，避免 Apache 再压缩一次导致长度丢失
-- `.htaccess` 对 `dl.php` 设置 `ap_trust_cgilike_cl 1`。Apache 2.4.62+ 配合 PHP-FPM 时会丢弃脚本设置的 `Content-Length` 并强制 chunked，这个开关让 Apache 信任脚本给出的长度
-- `Cache-Control` 带 `no-transform`，避免 Cloudflare 等 CDN 改动响应
-
-`.htaccess` 里的 `AddOutputFilterByType DEFLATE ...` 白名单仍然保留，用于站点里的静态文本文件；`RemoveOutputFilter DEFLATE` 会先清掉主机可能配置的全量压缩。
-
-Nginx 不读取 `.htaccess`，建议同样使用白名单：
-
-```nginx
-gzip on;
-gzip_vary on;
-gzip_types
-    text/plain text/css text/xml text/csv text/vtt
-    application/json application/ld+json application/xml
-    application/xhtml+xml application/javascript
-    image/svg+xml application/x-subrip
-    application/vnd.apple.mpegurl application/dash+xml;
-```
-
-不要使用 `gzip_types *`，否则二进制文件也会被压缩。`dl.php` 返回 `Content-Encoding: gzip` 时 Nginx 不会再次压缩；二进制响应则保持原始长度。
-
-小于 1 KiB 的文本文件不会压缩，属于正常现象；以响应头是否出现 `Content-Encoding: gzip` 为准。
-
-如果站点前面有 Cloudflare，响应里还会带 `Cache-Control: no-transform`。Cloudflare 在压缩或重新压缩响应时可能移除 `Content-Length`，加上 `no-transform` 后才会保留源站的文件大小，浏览器下载时也才能显示总大小。
-
-### 大文件与性能
-
-每个下载都会占用一个 PHP worker。代码里已经做了：
-
-- 清理输出缓冲，避免整份文件进内存
-- `set_time_limit(0)`，避免 PHP 超时截断
-- 64 KiB 分块输出，客户端断开后停止读取
-- `Cache-Control: private, no-store, no-transform`，避免共享缓存保存签名内容，也避免 Cloudflare 等 CDN 改动响应并丢失 `Content-Length`
-- 音视频、HLS/DASH 清单和 WebVTT 使用 `Content-Disposition: inline`，其他文件使用 `attachment`
-
-如果主机有 Nginx，可以在未来加 `X-Accel-Redirect`；Apache 有 `mod_xsendfile` 时也可以用 `X-Sendfile`，让鉴权后由 Web 服务器发送文件。当前版本默认使用 PHP 流式输出，兼容性最好。
+gzip 策略细节、Content-Length 注意事项、X-Sendfile 启用与验证步骤见 [docs/performance.md](docs/performance.md)。
 
 ---
 
@@ -332,6 +199,8 @@ gzip_types
 3. 从 `config.php` 里删掉 `public`、`require_sign`、`stream_fallback`（不删也会被忽略）。
 4. 确认数据目录不能被 Web 直接访问。
 5. 重新点一次 OpenList 下载验证：网络面板里应该只有 `dl.php` 请求，没有 `/f/...`。
+
+新版本新增可选配置键 `xsendfile`，默认 `false`，旧部署不需要任何改动。
 
 ---
 
@@ -349,6 +218,9 @@ gzip_types
 | 浏览器下载不显示总大小 | Apache 2.4.62+ + PHP-FPM 丢弃了脚本的 `Content-Length`，或 CDN 压缩后移除了长度 | 保留 `.htaccess` 里的 `ap_trust_cgilike_cl 1`、`no-gzip` 和响应头 `Cache-Control: no-transform` |
 | 视频不能拖动 | 客户端没把 `Range` 发给 `dl.php` | 确认播放器请求的是带 `sign` 的完整 URL，并可返回 206 |
 | 下载走回 OpenList | OpenList 没用到“下载代理 URL” | 确认字段没写错、结尾没斜杠；SFTP 正常不需要开 Web 代理 |
+| 启用 `xsendfile` 后下载 0 字节 | Apache 没加载 `mod_xsendfile` | 把 `xsendfile` 改回 `false`；或请主机商装模块并配 `XSendFilePath` |
+| 启用 `xsendfile` 后 404 | `XSendFilePath` 未配置，或与数据根真实路径不一致 | 在主配置里配白名单，填 realpath |
+| 客户端看到 `X-Sendfile` 响应头 | 模块未加载且 `.htaccess` 兜底未生效 | 检查主机是否允许 `.htaccess`（AllowOverride），并关闭 `xsendfile` |
 | OpenList 里复制大目录很慢 | SFTP 没有原生 Copy，OpenList 会回退成“读源文件再写到目标” | 单文件正常；大目录建议在服务器上用 `cp`/`rsync` |
 | PATH_INFO 被主机禁用 | 访问 `/dl.php/...` 直接 404，PHP 没执行 | 加 rewrite，见下 |
 
@@ -398,6 +270,7 @@ docker run --rm -v "$PWD":/src -w /src php:8.2-cli \
 │   └── package.sh
 ├── src/
 ├── tests/run.php
+├── docs/                     # 架构与设计决策、性能与压缩
 ├── Makefile
 └── LICENSE
 ```
