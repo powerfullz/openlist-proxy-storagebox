@@ -50,6 +50,9 @@ final class Response
 
         // Large downloads can easily outlive the default max_execution_time.
         @set_time_limit(0);
+        // Host-level output compression would fight the gzip branch below and
+        // make Content-Length unreliable.
+        @ini_set('zlib.output_compression', '0');
         header_remove('X-Powered-By');
 
         $size = filesize($file);
@@ -179,23 +182,23 @@ final class Response
 
         header('Content-Length: ' . $range->length());
 
+        // C-level copies: no per-chunk PHP loop, and the SAPI stops the copy
+        // as soon as a write fails (client gone).
+        if (!$range->partial()) {
+            readfile($file);
+            exit;
+        }
+
         $fp = fopen($file, 'rb');
         if ($fp === false) {
             exit;
         }
         fseek($fp, $range->start());
 
-        $remaining = $range->length();
-        while ($remaining > 0 && !feof($fp)) {
-            $chunk = fread($fp, (int)min(1024 * 64, $remaining));
-            if ($chunk === false || $chunk === '') {
-                break;
-            }
-            echo $chunk;
-            $remaining -= strlen($chunk);
-            if (connection_aborted()) {
-                break;
-            }
+        $out = fopen('php://output', 'wb');
+        if ($out !== false) {
+            stream_copy_to_stream($fp, $out, $range->length());
+            fclose($out);
         }
         fclose($fp);
         exit;
