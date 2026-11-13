@@ -1,6 +1,6 @@
 # OpenList StorageBox Proxy
 
-[![Proudly Vibe Coded - Neon Flame](https://vibecoded.fyi/badges/flat/main/proudly-vibe-coded-neon-flame.svg)](https://vibecoded.fyi/)
+[![Proudly Vibe Coded - Neon Flame](https://vibecoded.fyi/badges/terminal/main/proudly-vibe-coded-neon-flame.svg)](https://vibecoded.fyi/)
 
 让 OpenList 里**没有公网直链**的存储（SFTP、rsync 虚拟主机、StorageBox 等）也能 302 直链下载：文件不经过 OpenList 中转，浏览器直接向存储所在的主机取文件。
 
