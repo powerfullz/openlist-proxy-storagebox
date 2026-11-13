@@ -11,6 +11,7 @@ use OpenListProxy\Mime;
 use OpenListProxy\Mount;
 use OpenListProxy\MountResolver;
 use OpenListProxy\Request;
+use OpenListProxy\Response;
 use OpenListProxy\Signature;
 
 $assertions = 0;
@@ -187,6 +188,15 @@ same(0, $range->start(), 'full response start');
 same(21, $range->end(), 'full response end');
 check(!$range->partial(), 'full response is not partial');
 
+// --- Transfer planning -------------------------------------------------------
+
+same('sendfile', Response::planTransfer(true, false, 'GET'), 'binary GET uses sendfile when enabled');
+same('sendfile', Response::planTransfer(true, false, 'HEAD'), 'HEAD uses sendfile when enabled');
+same('compress', Response::planTransfer(true, true, 'GET'), 'compressible text keeps PHP gzip when enabled');
+same('stream', Response::planTransfer(false, false, 'GET'), 'binary GET streams when disabled');
+same('head', Response::planTransfer(false, false, 'HEAD'), 'HEAD stays in PHP when disabled');
+same('compress', Response::planTransfer(false, true, 'GET'), 'text gzip unchanged when disabled');
+
 // --- Config ----------------------------------------------------------------
 
 $configFile = $base . '/config.php';
@@ -200,6 +210,16 @@ file_put_contents(
 $config = Config::fromFile($configFile);
 same('t', $config->token(), 'config token');
 same(1, count($config->mounts()), 'config mount count');
+same(false, $config->xsendfile(), 'xsendfile defaults to false');
+
+$xsendfileConfig = $base . '/xsendfile-config.php';
+file_put_contents(
+    $xsendfileConfig,
+    "<?php return ['token' => 't', 'xsendfile' => true, 'mounts' => ['/storagebox' => ['root' => "
+    . var_export($root, true)
+    . "]]];"
+);
+same(true, Config::fromFile($xsendfileConfig)->xsendfile(), 'xsendfile opt-in read');
 
 $legacyConfig = $base . '/legacy-config.php';
 file_put_contents(
@@ -227,6 +247,7 @@ try {
 @rmdir($root . '/sub');
 @rmdir($root);
 @unlink($configFile);
+@unlink($xsendfileConfig);
 @unlink($legacyConfig);
 @unlink($badConfig);
 @rmdir($base);

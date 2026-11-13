@@ -16,6 +16,7 @@ final class Config
         private string $token,
         private string $pathPrefix,
         private bool $debug,
+        private bool $xsendfile,
         private array $mounts
     ) {
     }
@@ -47,6 +48,7 @@ final class Config
             (string)($raw['token'] ?? ''),
             (string)($raw['path_prefix'] ?? ''),
             (bool)($raw['debug'] ?? false),
+            (bool)($raw['xsendfile'] ?? false),
             $mounts
         );
     }
@@ -64,6 +66,11 @@ final class Config
     public function debug(): bool
     {
         return $this->debug;
+    }
+
+    public function xsendfile(): bool
+    {
+        return $this->xsendfile;
     }
 
     /**

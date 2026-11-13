@@ -33,4 +33,10 @@ return [
 
     // Log request paths to PHP's error_log. Turn off after debugging.
     'debug' => false,
+
+    // Let Apache serve files natively after the signature check
+    // (mod_xsendfile). Only enable when the module is loaded AND
+    // XSendFilePath is set to the real data root in the server/vhost
+    // config; otherwise downloads return an empty body. See README.
+    'xsendfile' => false,
 ];

@@ -59,6 +59,23 @@ Options -Indexes
     SetEnvIf Range "^bytes=" no-gzip
 </IfModule>
 
+# Optional X-Sendfile acceleration (config.php: 'xsendfile' => true).
+# dl.php verifies the signature, then Apache serves the file natively.
+# XSendFilePath cannot be set here: it must go into the server/vhost config
+# and whitelist ONLY the real path of the data root, never the web root.
+<IfModule mod_xsendfile.c>
+    XSendFile On
+</IfModule>
+<IfModule !mod_xsendfile.c>
+    <IfModule mod_headers.c>
+        # Without the module the X-Sendfile header would leak the absolute
+        # file path to the client. Strip it; keep 'xsendfile' => false in
+        # this case, otherwise downloads return an empty body.
+        Header unset X-Sendfile
+        Header always unset X-Sendfile
+    </IfModule>
+</IfModule>
+
 <IfModule mod_mime.c>
     AddType video/mp4 .mp4 .m4v .m4s
     AddType video/x-matroska .mkv

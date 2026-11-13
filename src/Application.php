@@ -53,7 +53,8 @@ final class Application
             $file->path(),
             $request->method(),
             $request->range(),
-            $request->acceptsGzip()
+            $request->acceptsGzip(),
+            $this->config->xsendfile()
         );
     }
 }

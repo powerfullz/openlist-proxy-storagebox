@@ -19,11 +19,28 @@ final class Response
         exit;
     }
 
+    /**
+     * @return 'sendfile'|'head'|'compress'|'stream'
+     */
+    public static function planTransfer(bool $xsendfile, bool $compress, string $method): string
+    {
+        if ($xsendfile && !$compress) {
+            return 'sendfile';
+        }
+
+        if ($method === 'HEAD') {
+            return 'head';
+        }
+
+        return $compress ? 'compress' : 'stream';
+    }
+
     public static function stream(
         string $file,
         string $method,
         ?string $rangeHeader,
-        bool $acceptsGzip = false
+        bool $acceptsGzip = false,
+        bool $xsendfile = false
     ): void {
         while (ob_get_level() > 0) {
             if (!@ob_end_clean()) {
@@ -47,8 +64,6 @@ final class Response
             header('Content-Range: bytes */' . $size);
             self::text(416, 'range not satisfiable');
         }
-
-        http_response_code($range->partial() ? 206 : 200);
 
         $mimeRaw = function_exists('mime_content_type') ? (mime_content_type($file) ?: '') : '';
         $mime = Mime::normalize($mimeRaw);
@@ -87,11 +102,23 @@ final class Response
         header('X-Content-Type-Options: nosniff');
         header('Referrer-Policy: no-referrer');
 
+        $mode = self::planTransfer($xsendfile, $compress, $method);
+
+        if ($mode === 'sendfile') {
+            // mod_xsendfile serves the file natively and strips this header;
+            // status, Content-Length, Range and HEAD are handled by Apache.
+            header('X-Sendfile: ' . $file);
+            header('X-Proxy-Mode: sendfile');
+            exit;
+        }
+
+        http_response_code($range->partial() ? 206 : 200);
+
         if ($range->partial()) {
             header('Content-Range: bytes ' . $range->start() . '-' . $range->end() . '/' . $size);
         }
 
-        if ($method === 'HEAD') {
+        if ($mode === 'head') {
             header('Content-Length: ' . $range->length());
             exit;
         }
